@@ -50,11 +50,11 @@ def get_cookie(text):
         return(found)
 
 # Parameters
-URL = 'http://f3f6f1e6-istiosystem-istio-2af2-1570305981.eu-west-1.elb.amazonaws.com/'
-pipeline_name = "test_from_GitHub"
-job_name = 'HUGO_run' + today
+URL = os.getenv('URL')
+pipeline_name = "advanced_pipeline"
+job_name = 'job' + today
 kind = "update"
-ENDPOINT = os.getenv('ENDPOINT')
+ENDPOINT = os.getenv('ENDPOINT') # Reminder : ENDPOINT is URL which ends with ...amazonaws.com/pipeline
 authservice_session = os.getenv('authservice_session')
 EMAIL = os.getenv('EMAIL')
 PASSWORD = os.getenv('PASSWORD')
