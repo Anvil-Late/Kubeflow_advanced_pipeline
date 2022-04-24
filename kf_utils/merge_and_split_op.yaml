@@ -1,0 +1,83 @@
+name: Merge and split
+metadata:
+  annotations: {author: Antoine Villatte}
+inputs:
+- {name: bucket, type: String}
+- {name: data_2015, type: String}
+- {name: data_2016, type: String}
+outputs:
+- {name: output_edfcsv, type: CSV}
+implementation:
+  container:
+    image: public.ecr.aws/f6t4n1w1/poc_kf_pipeline:latest
+    command:
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n   \
+      \ os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
+      \ndef merge_and_split(bucket, \n                    data_2015, \n          \
+      \          data_2016, \n                    output_edfcsv):\n\n    import pandas\
+      \ as pd\n    import re\n    import boto3\n    from io import StringIO\n    from\
+      \ sklearn.model_selection import GroupShuffleSplit\n\n    def get_location(text,\
+      \ method):\n        \"\"\"Retrieves data from the 2015 dataset to harmonize\
+      \ it with the 2016 dataset\"\"\"\n        if method == \"latitude\":\n     \
+      \       match = re.search('{\\'latitude\\': \\'(.+?)\\', \\'longitude', text)\n\
+      \        elif method == \"longitude\":\n            match = re.search('[0-9]\\\
+      ', \\'longitude\\': \\'(.+?)\\', \\'human_address\\'', text)\n        elif method\
+      \ == \"address\":\n            match = re.search('\\'{\"address\": \"(.+?)\"\
+      , \"city\":', text)      \n        elif method == \"city\":\n            match\
+      \ = re.search('\", \"city\": \"(.+?)\", \"state\":', text)\n        elif method\
+      \ == \"state\":\n            match = re.search('\"state\": \"(.+?)\", \"zip\"\
+      :', text)\n        elif method == \"zip\":\n            match = re.search('\"\
+      zip\": \"(.+?)\"}\\'}', text)\n        else:\n            raise ValueError(\"\
+      Veuillez choisir une m\xE9thode (latitude, longitude, adress, city, state, zip)\"\
+      )\n\n        if match:\n            found = match.group(1)\n            return(found)\n\
+      \        return(\"N/A\")\n\n    # Load datasets\n    csv_strings = {}\n    encoding\
+      \ = 'utf-8'\n    for source_data, year in zip([data_2015, data_2016], [\"2015\"\
+      , \"2016\"]):\n        csv_obj = boto3.client('s3').get_object(Bucket=bucket,\
+      \ Key=source_data)\n        body = csv_obj['Body']\n        csv_string = body.read().decode(encoding)\n\
+      \        csv_strings[year] = csv_string\n\n    data15 = pd.read_csv(StringIO(csv_strings[\"\
+      2015\"]))\n    data16 = pd.read_csv(StringIO(csv_strings[\"2016\"]))\n\n   \
+      \ # Rename mismatched columns\n    rename_cols = {\n        \"GHGEmissions(MetricTonsCO2e)\"\
+      \ : \"TotalGHGEmissions\",\n        \"GHGEmissionsIntensity(kgCO2e/ft2)\" :\
+      \ \"GHGEmissionsIntensity\",\n        \"Comment\" : \"Comments\"\n    }\n  \
+      \  data15.rename(columns = rename_cols, inplace = True)\n\n    # Extract location\
+      \ info from 2015 dataset to harmonize it\n    data15[\"Latitude\"] = data15[\"\
+      Location\"].apply(get_location, method = \"latitude\")\n    data15[\"Longitude\"\
+      ] = data15[\"Location\"].apply(get_location, method = \"longitude\")\n    data15[\"\
+      Address\"] = data15[\"Location\"].apply(get_location, method = \"address\")\n\
+      \    data15[\"City\"] = data15[\"Location\"].apply(get_location, method = \"\
+      city\")\n    data15[\"State\"] = data15[\"Location\"].apply(get_location, method\
+      \ = \"state\")\n    data15[\"ZipCode\"] = data15[\"Location\"].apply(get_location,\
+      \ method = \"zip\")\n    data15[\"ZipCode\"] = data15[\"ZipCode\"].astype(int)\
+      \ # convert to numeric\n    data15.drop(columns = \"Location\", inplace = True)\n\
+      \n    # Delete columns from data15 that arent in data16\n    data15.drop(columns\
+      \ = set(data15.columns.tolist()).difference(data16.columns.tolist()), inplace\
+      \ = True)\n\n    # Harmonize column order\n    cols_order = data16.columns.tolist()\n\
+      \    data15 = data15.loc[:, cols_order]\n\n    # Concatenate\n    emission_df\
+      \ = pd.concat([data15, data16], axis = 0, ignore_index = True)\n\n    # Train/test\
+      \ split\n    inTrain , inTest = next(GroupShuffleSplit(train_size = 0.7, random_state\
+      \ = 42).\\\n                        split(emission_df, groups = emission_df[\"\
+      OSEBuildingID\"]))\n\n    emission_df[\"in_train\"] = 0\n    emission_df.iloc[inTrain,\
+      \ 46] = 1\n\n    emission_df.to_csv(output_edfcsv, index=False)\n\nimport argparse\n\
+      _parser = argparse.ArgumentParser(prog='Merge and split', description='')\n\
+      _parser.add_argument(\"--bucket\", dest=\"bucket\", type=str, required=True,\
+      \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--data-2015\", dest=\"\
+      data_2015\", type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --data-2016\", dest=\"data_2016\", type=str, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--output-edfcsv\", dest=\"output_edfcsv\", type=_make_parent_dirs_and_return_path,\
+      \ required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\
+      \n_outputs = merge_and_split(**_parsed_args)\n"
+    args:
+    - --bucket
+    - {inputValue: bucket}
+    - --data-2015
+    - {inputValue: data_2015}
+    - --data-2016
+    - {inputValue: data_2016}
+    - --output-edfcsv
+    - {outputPath: output_edfcsv}

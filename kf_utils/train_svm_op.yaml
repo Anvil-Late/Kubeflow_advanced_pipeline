@@ -1,0 +1,90 @@
+name: Train svm
+metadata:
+  annotations: {author: Antoine Villatte}
+inputs:
+- {name: input_x_train_csv, type: CSV}
+- {name: input_y_train_csv, type: CSV}
+- {name: input_x_test_csv, type: CSV}
+- {name: input_y_test_csv, type: CSV}
+- {name: hyperopt_iterations, type: Integer}
+outputs:
+- {name: MSE, type: Float}
+- {name: R2, type: Float}
+- {name: hyperparams, type: JsonObject}
+implementation:
+  container:
+    image: public.ecr.aws/f6t4n1w1/poc_kf_pipeline:latest
+    command:
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - "def train_svm(input_x_train_csv, \n              input_y_train_csv, \n    \
+      \          input_x_test_csv, \n              input_y_test_csv,\n           \
+      \   hyperopt_iterations\n  ):\n\n    global best\n\n    import pandas as pd\n\
+      \    import xgboost as xgb\n    from sklearn.metrics import mean_squared_error,\
+      \ explained_variance_score, r2_score\n    from sklearn.model_selection import\
+      \ cross_val_score, KFold\n    from sklearn.svm import SVR\n    import hyperopt\n\
+      \    from hyperopt import fmin, tpe, hp, STATUS_OK, Trials, space_eval\n   \
+      \ from random import seed\n\n    X_train = pd.read_csv(input_x_train_csv)\n\
+      \    y_train = pd.read_csv(input_y_train_csv)\n    X_test = pd.read_csv(input_x_test_csv)\n\
+      \    y_test = pd.read_csv(input_y_test_csv)\n\n    seed(42)\n    def model_accuracy(params):\n\
+      \        svm_reg = SVR(**params)\n        return cross_val_score(svm_reg, X_train,\
+      \ y_train).mean()\n\n    space = {\n        'C': hp.quniform('C', 0.005, 1.0,\
+      \ 0.01),\n        'degree': hp.choice('degree', range(2, 6)),\n        'coef0'\
+      \ : hp.quniform('coef0', 0.5, 2, 0.2),\n        'gamma' : hp.quniform('gamma',\
+      \ 0.005, 0.1, 0.01),\n        'kernel': hp.choice('kernel', [\"linear\", \"\
+      rbf\", \"sigmoid\"])\n    }\n\n    best=0\n    def hyperparameter_tuning(space):\n\
+      \        global best\n        acc = model_accuracy(space)\n\n        if acc\
+      \ > best:\n            best = acc\n            print ('new best:', best, space)\n\
+      \n        return {'loss': 1-acc, 'status': STATUS_OK}\n\n    trials = Trials()\n\
+      \    best = fmin(hyperparameter_tuning, space, algo=tpe.suggest, max_evals=hyperopt_iterations,\
+      \ trials=trials)\n\n    svm_hyperparams = space_eval(space, best)\n\n    modfit_svm\
+      \ = SVR(**svm_hyperparams)\n\n    modfit_svm.fit(X_train, y_train)\n\n    svm_mse\
+      \ = mean_squared_error(y_test.to_numpy(), modfit_svm.predict(X_test))\n    svm_accuracies\
+      \ = cross_val_score(estimator = modfit_svm, X = X_test, y = y_test, \n     \
+      \                               cv = 10)\n    svm_r2 = svm_accuracies.mean()\n\
+      \n    return(svm_mse, svm_r2, svm_hyperparams)\n\ndef _serialize_float(float_value:\
+      \ float) -> str:\n    if isinstance(float_value, str):\n        return float_value\n\
+      \    if not isinstance(float_value, (float, int)):\n        raise TypeError('Value\
+      \ \"{}\" has type \"{}\" instead of float.'.format(\n            str(float_value),\
+      \ str(type(float_value))))\n    return str(float_value)\n\ndef _serialize_json(obj)\
+      \ -> str:\n    if isinstance(obj, str):\n        return obj\n    import json\n\
+      \n    def default_serializer(obj):\n        if hasattr(obj, 'to_struct'):\n\
+      \            return obj.to_struct()\n        else:\n            raise TypeError(\n\
+      \                \"Object of type '%s' is not JSON serializable and does not\
+      \ have .to_struct() method.\"\n                % obj.__class__.__name__)\n\n\
+      \    return json.dumps(obj, default=default_serializer, sort_keys=True)\n\n\
+      import argparse\n_parser = argparse.ArgumentParser(prog='Train svm', description='')\n\
+      _parser.add_argument(\"--input-x-train-csv\", dest=\"input_x_train_csv\", type=str,\
+      \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--input-y-train-csv\"\
+      , dest=\"input_y_train_csv\", type=str, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--input-x-test-csv\", dest=\"input_x_test_csv\", type=str,\
+      \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--input-y-test-csv\"\
+      , dest=\"input_y_test_csv\", type=str, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--hyperopt-iterations\", dest=\"hyperopt_iterations\"\
+      , type=int, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      ----output-paths\", dest=\"_output_paths\", type=str, nargs=3)\n_parsed_args\
+      \ = vars(_parser.parse_args())\n_output_files = _parsed_args.pop(\"_output_paths\"\
+      , [])\n\n_outputs = train_svm(**_parsed_args)\n\n_output_serializers = [\n \
+      \   _serialize_float,\n    _serialize_float,\n    _serialize_json,\n\n]\n\n\
+      import os\nfor idx, output_file in enumerate(_output_files):\n    try:\n   \
+      \     os.makedirs(os.path.dirname(output_file))\n    except OSError:\n     \
+      \   pass\n    with open(output_file, 'w') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"
+    args:
+    - --input-x-train-csv
+    - {inputPath: input_x_train_csv}
+    - --input-y-train-csv
+    - {inputPath: input_y_train_csv}
+    - --input-x-test-csv
+    - {inputPath: input_x_test_csv}
+    - --input-y-test-csv
+    - {inputPath: input_y_test_csv}
+    - --hyperopt-iterations
+    - {inputValue: hyperopt_iterations}
+    - '----output-paths'
+    - {outputPath: MSE}
+    - {outputPath: R2}
+    - {outputPath: hyperparams}

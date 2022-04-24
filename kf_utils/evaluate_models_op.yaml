@@ -1,0 +1,142 @@
+name: Evaluate models
+metadata:
+  annotations: {author: Antoine Villatte}
+inputs:
+- {name: bucket, type: String}
+- {name: subfolder, type: String}
+- {name: svm_mse, type: Float}
+- {name: svm_r2, type: Float}
+- {name: svm_hyperparams, type: JsonObject}
+- {name: xgb_mse, type: Float}
+- {name: xgb_r2, type: Float}
+- {name: xgb_hyperparams, type: JsonObject}
+- {name: rf_mse, type: Float}
+- {name: rf_r2, type: Float}
+- {name: rf_hyperparams, type: JsonObject}
+outputs:
+- {name: best_model, type: String}
+- {name: hyperparams, type: JsonObject}
+implementation:
+  container:
+    image: public.ecr.aws/f6t4n1w1/poc_kf_pipeline:latest
+    command:
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - "def evaluate_models(bucket, \n                     subfolder,\n           \
+      \          svm_mse, \n                     svm_r2, \n                     svm_hyperparams,\
+      \ \n                     xgb_mse, \n                     xgb_r2, \n        \
+      \             xgb_hyperparams, \n                     rf_mse, \n           \
+      \          rf_r2, \n                     rf_hyperparams\n                  \
+      \   ):\n\n    import pandas as pd\n    import matplotlib.pyplot as plt\n   \
+      \ import seaborn as sns\n    import numpy as np\n    import boto3\n\n    def\
+      \ easy_bar_plot(x, y, data, figname, order=None, xlab=None, ylab=None, title=None,\
+      \ grid=True,\n                  values_over_bars=True, vob_round=0, vob_offset=None,\
+      \ vob_rot=None, x_tick_rot=None):\n\n        fig, ax = plt.subplots(figsize\
+      \ = (18, 8))\n        if order is None:\n            order = np.sort(data[x].unique())\
+      \ \n        sns.barplot(x=x, y=y, data=data, ax=ax, order=order)\n        if\
+      \ xlab is not None:\n            ax.set_xlabel(xlab, fontsize = 16, fontweight\
+      \ = \"bold\")\n        if ylab is not None:\n            ax.set_ylabel(ylab,\
+      \ fontsize = 16, fontweight = \"bold\")\n        if title is not None:\n   \
+      \         plt.suptitle(title, fontsize = 18, fontweight = \"bold\")\n\n    \
+      \    if grid :\n            plt.grid(b=True, which='major', axis='both', alpha\
+      \ = 0.3)\n\n        if values_over_bars:\n            if vob_offset is None:\n\
+      \                vob_offset = 0.015\n            if vob_rot is None:\n     \
+      \           vob_rot = 0\n            if vob_rot > 0:\n                ha=\"\
+      left\"\n            else:\n                ha=\"center\"\n            pos=0\n\
+      \            for i, (q, val) in data.iterrows():\n                if val !=\
+      \ 0:\n                    ax.text(pos, val + vob_offset*data[y].max(), \"{}\"\
+      .format(round(val,vob_round)), \n                            ha=ha, fontsize\
+      \ = 12, fontweight = \"bold\", rotation=vob_rot, \n                        \
+      \   rotation_mode=\"anchor\")\n                pos += 1\n        if x_tick_rot\
+      \ is not None:\n            plt.xticks(rotation = x_tick_rot, ha=\"right\")\n\
+      \        plt.savefig(figname)\n        plt.show()\n\n    performance_report\
+      \ = {}\n    performance_report[\"SVM\"] = {\"MSE\" : svm_mse, \"R2\" : svm_r2}\n\
+      \    performance_report[\"XGB\"] = {\"MSE\" : xgb_mse, \"R2\" : xgb_r2}\n  \
+      \  performance_report[\"RandomForest\"] = {\"MSE\" : rf_mse, \"R2\" : rf_r2}\n\
+      \n    performance_df = pd.DataFrame.from_dict(performance_report, orient=\"\
+      index\")\n    performance_df = performance_df.reset_index().rename(columns={\"\
+      index\" : \"Model\"})\n\n    hyperparams_dict = {\"SVM\" : svm_hyperparams,\
+      \ \"XGB\" : xgb_hyperparams, \"RandomForest\" : rf_hyperparams}\n\n    easy_bar_plot(x=\"\
+      Model\", y=\"R2\", data=performance_df[[\"Model\", \"R2\"]],\n             \
+      \     figname = \"./model_performance_R2.png\",\n                  order=performance_df[\"\
+      Model\"], \n                  xlab=\"Model\", \n                  ylab=\"R2\
+      \ score\", \n                  title=\"R2 score by Model\", \n             \
+      \     grid=True, \n                  values_over_bars=True, \n             \
+      \     vob_round=3, \n                  vob_offset=None, \n                 \
+      \ vob_rot=None, \n                  x_tick_rot=None)\n\n    easy_bar_plot(x=\"\
+      Model\", y=\"MSE\", data=performance_df[[\"Model\", \"MSE\"]], \n          \
+      \        figname = \"./model_performance_MSE.png\",\n                  order=performance_df[\"\
+      Model\"], \n                  xlab=\"Model\", \n                  ylab=\"MSE\"\
+      , \n                  title=\"MSE by Model\", \n                  grid=True,\
+      \ \n                  values_over_bars=True, \n                  vob_round=3,\
+      \ \n                  vob_offset=None, \n                  vob_rot=None, \n\
+      \                  x_tick_rot=None)\n\n    best_model = performance_df.loc[performance_df[\"\
+      R2\"]==performance_df[\"R2\"].max(), \"Model\"].values[0]\n    best_models_hyperparams\
+      \ = hyperparams_dict[best_model]\n\n    s3_resource = boto3.client('s3')\n \
+      \   s3_resource.upload_file(\"./model_performance_R2.png\", \n             \
+      \               bucket, \n                            subfolder + \"/model_performance_R2.png\"\
+      )\n    s3_resource.upload_file(\"./model_performance_MSE.png\", \n         \
+      \                   bucket, \n                            subfolder + \"/model_performance_MSE.png\"\
+      )\n\n    return (best_model, best_models_hyperparams)\n\ndef _serialize_json(obj)\
+      \ -> str:\n    if isinstance(obj, str):\n        return obj\n    import json\n\
+      \n    def default_serializer(obj):\n        if hasattr(obj, 'to_struct'):\n\
+      \            return obj.to_struct()\n        else:\n            raise TypeError(\n\
+      \                \"Object of type '%s' is not JSON serializable and does not\
+      \ have .to_struct() method.\"\n                % obj.__class__.__name__)\n\n\
+      \    return json.dumps(obj, default=default_serializer, sort_keys=True)\n\n\
+      def _serialize_str(str_value: str) -> str:\n    if not isinstance(str_value,\
+      \ str):\n        raise TypeError('Value \"{}\" has type \"{}\" instead of str.'.format(\n\
+      \            str(str_value), str(type(str_value))))\n    return str_value\n\n\
+      import json\nimport argparse\n_parser = argparse.ArgumentParser(prog='Evaluate\
+      \ models', description='')\n_parser.add_argument(\"--bucket\", dest=\"bucket\"\
+      , type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --subfolder\", dest=\"subfolder\", type=str, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--svm-mse\", dest=\"svm_mse\", type=float, required=True,\
+      \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--svm-r2\", dest=\"svm_r2\"\
+      , type=float, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --svm-hyperparams\", dest=\"svm_hyperparams\", type=json.loads, required=True,\
+      \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--xgb-mse\", dest=\"xgb_mse\"\
+      , type=float, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --xgb-r2\", dest=\"xgb_r2\", type=float, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--xgb-hyperparams\", dest=\"xgb_hyperparams\", type=json.loads,\
+      \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--rf-mse\"\
+      , dest=\"rf_mse\", type=float, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --rf-r2\", dest=\"rf_r2\", type=float, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--rf-hyperparams\", dest=\"rf_hyperparams\", type=json.loads,\
+      \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"----output-paths\"\
+      , dest=\"_output_paths\", type=str, nargs=2)\n_parsed_args = vars(_parser.parse_args())\n\
+      _output_files = _parsed_args.pop(\"_output_paths\", [])\n\n_outputs = evaluate_models(**_parsed_args)\n\
+      \n_output_serializers = [\n    _serialize_str,\n    _serialize_json,\n\n]\n\n\
+      import os\nfor idx, output_file in enumerate(_output_files):\n    try:\n   \
+      \     os.makedirs(os.path.dirname(output_file))\n    except OSError:\n     \
+      \   pass\n    with open(output_file, 'w') as f:\n        f.write(_output_serializers[idx](_outputs[idx]))\n"
+    args:
+    - --bucket
+    - {inputValue: bucket}
+    - --subfolder
+    - {inputValue: subfolder}
+    - --svm-mse
+    - {inputValue: svm_mse}
+    - --svm-r2
+    - {inputValue: svm_r2}
+    - --svm-hyperparams
+    - {inputValue: svm_hyperparams}
+    - --xgb-mse
+    - {inputValue: xgb_mse}
+    - --xgb-r2
+    - {inputValue: xgb_r2}
+    - --xgb-hyperparams
+    - {inputValue: xgb_hyperparams}
+    - --rf-mse
+    - {inputValue: rf_mse}
+    - --rf-r2
+    - {inputValue: rf_r2}
+    - --rf-hyperparams
+    - {inputValue: rf_hyperparams}
+    - '----output-paths'
+    - {outputPath: best_model}
+    - {outputPath: hyperparams}

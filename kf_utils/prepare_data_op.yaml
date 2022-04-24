@@ -1,0 +1,79 @@
+name: Prepare data
+metadata:
+  annotations: {author: Antoine Villatte}
+inputs:
+- {name: input_cleandatacsv, type: CSV}
+outputs:
+- {name: output_xtraincsv, type: CSV}
+- {name: output_ytraincsv, type: CSV}
+- {name: output_xtestcsv, type: CSV}
+- {name: output_ytestcsv, type: CSV}
+implementation:
+  container:
+    image: public.ecr.aws/f6t4n1w1/poc_kf_pipeline:latest
+    command:
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n   \
+      \ os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
+      \ndef prepare_data(input_cleandatacsv,\n                output_xtraincsv,\n\
+      \                output_ytraincsv,\n                output_xtestcsv,\n     \
+      \           output_ytestcsv):\n\n    import numpy as np\n    import pandas as\
+      \ pd\n    from sklearn.preprocessing import StandardScaler, OneHotEncoder\n\n\
+      \    clean_data = pd.read_csv(input_cleandatacsv)\n\n    # Numeric / categorical\
+      \ separation\n    numcols = clean_data.select_dtypes(include = np.number).columns\n\
+      \    catcols = list(set(clean_data.columns) - set(numcols))\n    othercols =\
+      \ [\"in_train\", \"SiteEnergyUse(kBtu)\", \"TotalGHGEmissions\", \"BCResponse\"\
+      ]\n    numcols = [feature for feature in numcols.tolist() if feature not in\
+      \ othercols]\n\n    num_data = clean_data.loc[:, numcols]\n    cat_data = clean_data.loc[:,\
+      \ catcols]\n    rest_data = clean_data.loc[:, othercols]\n\n    # Normalize\n\
+      \    standardscaler = StandardScaler()\n    num_data = standardscaler.fit_transform(num_data)\n\
+      \    num_data = pd.DataFrame(num_data, columns = numcols)\n\n    # Delete outliers\n\
+      \    not_extreme = (num_data.lt(3).all(axis = 1)) & (num_data.gt(-3).all(axis\
+      \ = 1))\n    for index in range(len(not_extreme)):\n        if rest_data.loc[:,\
+      \ \"in_train\"].iloc[index] == 0:\n            not_extreme[index] = True\n\n\
+      \    # Encode categorical variables\n    ohencoder = OneHotEncoder()\n    ohecat_data\
+      \ = ohencoder.fit_transform(cat_data).toarray()\n    ohecat_colnames = []\n\
+      \    for feature in catcols:\n        for value in clean_data[feature].unique().tolist():\n\
+      \            ohecat_colnames.append(feature + \"_\" + value)\n    ohecat_data\
+      \ = pd.DataFrame(ohecat_data, columns = ohecat_colnames)\n\n    # Remove sparse\
+      \ dummies \n    ohecat_data = ohecat_data.loc[:, ohecat_data.sum().ge(30)]\n\
+      \n    # Concatenate\n    preproc_data = pd.concat([rest_data, num_data, ohecat_data],\
+      \ axis = 1)\n    preproc_data = preproc_data.loc[not_extreme, :]\n    rest_data\
+      \ = rest_data.loc[not_extreme, :]\n\n    # train-test split\n    train = preproc_data.loc[preproc_data[\"\
+      in_train\"] == 1, :].drop(columns = \"in_train\")\n    test = preproc_data.loc[preproc_data[\"\
+      in_train\"] == 0, :].drop(columns = \"in_train\")\n\n    train = train.drop(columns\
+      \ = [\"TotalGHGEmissions\", \"SiteEnergyUse(kBtu)\"])\n    test = test.drop(columns\
+      \ = [\"TotalGHGEmissions\", \"SiteEnergyUse(kBtu)\"])\n\n    # Separate features\
+      \ from preds\n    X_train = train.drop(columns = \"BCResponse\")\n    Y_train\
+      \ = train[\"BCResponse\"]\n\n    X_test = test.drop(columns = \"BCResponse\"\
+      )\n    Y_test = test[\"BCResponse\"]\n\n    # Save files \n    output_artifact_list\
+      \ = [output_xtraincsv, output_ytraincsv, output_xtestcsv, output_ytestcsv]\n\
+      \n    for index, dataset in enumerate([X_train, Y_train, X_test, Y_test]):\n\
+      \        artif = output_artifact_list[index]\n        dataset.to_csv(artif,\
+      \ index = False, header = True)\n\nimport argparse\n_parser = argparse.ArgumentParser(prog='Prepare\
+      \ data', description='')\n_parser.add_argument(\"--input-cleandatacsv\", dest=\"\
+      input_cleandatacsv\", type=str, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--output-xtraincsv\", dest=\"output_xtraincsv\", type=_make_parent_dirs_and_return_path,\
+      \ required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"--output-ytraincsv\"\
+      , dest=\"output_ytraincsv\", type=_make_parent_dirs_and_return_path, required=True,\
+      \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--output-xtestcsv\", dest=\"\
+      output_xtestcsv\", type=_make_parent_dirs_and_return_path, required=True, default=argparse.SUPPRESS)\n\
+      _parser.add_argument(\"--output-ytestcsv\", dest=\"output_ytestcsv\", type=_make_parent_dirs_and_return_path,\
+      \ required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\
+      \n_outputs = prepare_data(**_parsed_args)\n"
+    args:
+    - --input-cleandatacsv
+    - {inputPath: input_cleandatacsv}
+    - --output-xtraincsv
+    - {outputPath: output_xtraincsv}
+    - --output-ytraincsv
+    - {outputPath: output_ytraincsv}
+    - --output-xtestcsv
+    - {outputPath: output_xtestcsv}
+    - --output-ytestcsv
+    - {outputPath: output_ytestcsv}

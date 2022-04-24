@@ -1,0 +1,121 @@
+name: Preprocess dataset
+metadata:
+  annotations: {author: Antoine Villatte}
+inputs:
+- {name: input_edfcsv, type: CSV}
+outputs:
+- {name: output_cleandatacsv, type: CSV}
+implementation:
+  container:
+    image: public.ecr.aws/f6t4n1w1/poc_kf_pipeline:latest
+    command:
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n   \
+      \ os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
+      \ndef preprocess_dataset(input_edfcsv,\n                        output_cleandatacsv):\n\
+      \n    import pandas as pd\n    import numpy as np\n    from scipy.stats import\
+      \ boxcox\n    import re\n    import math\n\n    def count_commas(text):\n  \
+      \      \"\"\"Fonction text.count(\",\") sachant g\xE9rer les nan\"\"\"\n   \
+      \     if type(text) is str :\n            return(text.count(\",\") + 1)\n  \
+      \      else :\n            if np.isnan(text):\n                return(np.nan)\n\
+      \            else :\n                raise(TypeError(\"Valeur non textuelle\
+      \ et non NA observ\xE9e\"))\n\n    def fetch_noFloors(emission_df, neighborhood,\
+      \ property_type):\n        neighb_prop_pivot_table = emission_df.dropna().loc[emission_df[\"\
+      in_train\"] == 1, :].pivot_table(\"NumberofFloors\", \n                    \
+      \                                               index = \"Neighborhood\", \n\
+      \                                                                   columns\
+      \ = \"PrimaryPropertyType\", \n                                            \
+      \                       aggfunc = lambda X: X.quantile(0.5))\n        output\
+      \ = neighb_prop_pivot_table.loc[neighborhood, property_type]\n        if math.isnan(output):\n\
+      \            print(\"Pas de donn\xE9es pour ce type de b\xE2timent dans ce voisinage,\
+      \ extraction de la m\xE9diane globale\")\n            output = round(neighb_prop_pivot_table.loc[:,\
+      \ property_type].quantile(0.5),0)\n\n        return(output)\n\n    emission_df\
+      \ = pd.read_csv(input_edfcsv)\n\n    # Log of response variable\n    emission_df[\"\
+      BCResponse\"] = boxcox(emission_df[\"TotalGHGEmissions\"] + 1, -0.1)\n\n   \
+      \ # Fill NAs\n        ## Impute SecondLargestPropertyUseType\n    emission_df.loc[(emission_df[\"\
+      SecondLargestPropertyUseType\"].isna()) & (~emission_df[\"ListOfAllPropertyUseTypes\"\
+      ].isna()), \n                    \"SecondLargestPropertyUseType\"] = \"None\"\
+      \n\n        ## Impute SecondLargestPropertyUseTypeGFA\n    emission_df.loc[(emission_df[\"\
+      SecondLargestPropertyUseTypeGFA\"].isna()) & (~emission_df[\"ListOfAllPropertyUseTypes\"\
+      ].isna()), \n                    \"SecondLargestPropertyUseTypeGFA\"] = 0\n\n\
+      \        ## Impute ThirdLargestPropertyUseType\n    emission_df.loc[(emission_df[\"\
+      ThirdLargestPropertyUseType\"].isna()) & (~emission_df[\"ListOfAllPropertyUseTypes\"\
+      ].isna()), \n                    \"ThirdLargestPropertyUseType\"] = \"None\"\
+      \n\n        ## Impute ThirdLargestPropertyUseTypeGFA\n    emission_df.loc[(emission_df[\"\
+      ThirdLargestPropertyUseTypeGFA\"].isna()) & (~emission_df[\"ListOfAllPropertyUseTypes\"\
+      ].isna()), \n                    \"ThirdLargestPropertyUseTypeGFA\"] = 0\n\n\
+      \    # Drop columns with too many NaNs\n    emission_df.drop(columns = [\"YearsENERGYSTARCertified\"\
+      , \"Comments\", \"Outlier\"], inplace = True)\n\n    # Only keep non residential\
+      \ buildings\n    emission_df = emission_df.loc[emission_df[\"BuildingType\"\
+      ].apply(lambda X: bool(re.search(\"^[Nn]on[Rr]esidential\", X))), :]\n    #\
+      \ Drop Building Type\n    emission_df.drop(columns = \"BuildingType\", inplace\
+      \ = True)\n\n    # Drop low-impact location variables\n    emission_df.drop(columns\
+      \ = [\"Address\", \"City\", \"State\", \"ZipCode\", \"TaxParcelIdentificationNumber\"\
+      , \"CouncilDistrictCode\"], \n                    inplace = True)\n\n    # Drop\
+      \ ID variables\n    emission_df.drop(columns = [\"OSEBuildingID\", \"PropertyName\"\
+      , \"DefaultData\"], inplace = True)\n\n    # Reset index\n    emission_df.reset_index(inplace\
+      \ = True, drop = True)\n\n    # Drop variables too highly correlated to the\
+      \ reponse variable\n    emission_df.drop(columns = ['SiteEUIWN(kBtu/sf)', 'SourceEUI(kBtu/sf)',\
+      \ 'SourceEUIWN(kBtu/sf)',\n                                'SiteEnergyUseWN(kBtu)',\
+      \ 'Electricity(kWh)', 'NaturalGas(therms)', \n                             \
+      \   \"SiteEUI(kBtu/sf)\", \"GHGEmissionsIntensity\"], inplace = True)\n\n  \
+      \  # Feature engineering : neighborhood type\n    emission_df[\"Neighborhood_type_GHGE\"\
+      ] = \"med-low\"\n    emission_df.loc[emission_df[\"Neighborhood\"].isin([\"\
+      GREATER DUWAMISH\", \"SOUTHEAST\"]), \"Neighborhood_type_GHGE\"] = \"low\"\n\
+      \    emission_df.loc[emission_df[\"Neighborhood\"].isin([\"NORTHEAST\", \"MAGNOLIA\
+      \ / QUEEN ANNE\", \"SOUTHWEST\", \"LAKE UNION\"]), \n                    \"\
+      Neighborhood_type_GHGE\"] = \"med-high\"\n    emission_df.loc[emission_df[\"\
+      Neighborhood\"].isin([\"DOWNTOWN\", \"EAST\"]), \"Neighborhood_type_GHGE\"]\
+      \ = \"high\"\n\n    # Feature engineering : age\n    emission_df[\"Age\"] =\
+      \ emission_df[\"DataYear\"] - emission_df[\"YearBuilt\"]\n\n    # FE : Number\
+      \ of use types\n    emission_df[\"NumberOfUseTypes\"] = emission_df[\"ListOfAllPropertyUseTypes\"\
+      ].apply(count_commas)\n\n    # FE : Proportion occupied by each use\n    three_uses_sum\
+      \ = emission_df[\"LargestPropertyUseTypeGFA\"] + emission_df[\"SecondLargestPropertyUseTypeGFA\"\
+      ] + \\\n                    emission_df[\"ThirdLargestPropertyUseTypeGFA\"]\n\
+      \n    emission_df[\"PrimaryUseGFARatio\"] = round(emission_df[\"LargestPropertyUseTypeGFA\"\
+      ] / three_uses_sum, 3)\n    emission_df[\"SecondaryUseGFARatio\"] = round(emission_df[\"\
+      SecondLargestPropertyUseTypeGFA\"] / three_uses_sum, 3)\n    emission_df[\"\
+      TerciaryUseGFARatio\"] = round(emission_df[\"ThirdLargestPropertyUseTypeGFA\"\
+      ] / three_uses_sum, 3)\n\n    # FE : proportion of each energy use\n    emission_df[\"\
+      NG_ratio\"] = round(emission_df[\"NaturalGas(kBtu)\"] / emission_df[\"SiteEnergyUse(kBtu)\"\
+      ], 3)\n    emission_df[\"Elec_ratio\"] = round(emission_df[\"Electricity(kBtu)\"\
+      ] / emission_df[\"SiteEnergyUse(kBtu)\"], 3)\n    emission_df[\"Steam_ratio\"\
+      ] = round(emission_df[\"SteamUse(kBtu)\"] / emission_df[\"SiteEnergyUse(kBtu)\"\
+      ], 3)\n    emission_df.drop(index = [780, 2781, 2027, 498, 1677], inplace =\
+      \ True) # Impossible values\n    emission_df.reset_index(drop = True, inplace\
+      \ = True)\n\n    # Drop useless columns\n    clean_data = emission_df.drop(columns\
+      \ = [\"DataYear\", \"Neighborhood\", \"Longitude\", \"Latitude\", \"YearBuilt\"\
+      , \"PropertyGFATotal\", \n                                            \"SteamUse(kBtu)\"\
+      , \"Electricity(kBtu)\", \"NaturalGas(kBtu)\", \"PrimaryPropertyType\"])\n\n\
+      \    # Drop NAs\n    clean_data.dropna(subset = [\"LargestPropertyUseType\"\
+      , \"TotalGHGEmissions\", \"NG_ratio\"], inplace = True)\n    emission_df.dropna().loc[emission_df[\"\
+      in_train\"] == 1, :].pivot_table(\"NumberofFloors\", \n                    \
+      \                                                    index = \"Neighborhood\"\
+      , \n                                                                       \
+      \ columns = \"PrimaryPropertyType\", \n                                    \
+      \                                    aggfunc = lambda X: X.quantile(0.5))\n\n\
+      \    # Fill NAs\n    for index in (clean_data.loc[clean_data[\"NumberofFloors\"\
+      ].isna(), \"NumberofFloors\"]).index.tolist():\n\n        row_neighborhood =\
+      \ emission_df.loc[emission_df.index == index, \"Neighborhood\"].at[index]\n\
+      \        row_property_type = emission_df.loc[emission_df.index == index, \"\
+      PrimaryPropertyType\"].at[index]\n\n        clean_data.loc[clean_data.index\
+      \ ==  index, \"NumberofFloors\"] = \\\n            fetch_noFloors(emission_df,\
+      \ row_neighborhood, row_property_type)\n\n    clean_data.loc[clean_data[\"ENERGYSTARScore\"\
+      ].isna(), \"ENERGYSTARScore\"] = 0\n    clean_data.reset_index(inplace = True,\
+      \ drop = True)\n\n    clean_data.to_csv(output_cleandatacsv, index=False)\n\n\
+      import argparse\n_parser = argparse.ArgumentParser(prog='Preprocess dataset',\
+      \ description='')\n_parser.add_argument(\"--input-edfcsv\", dest=\"input_edfcsv\"\
+      , type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --output-cleandatacsv\", dest=\"output_cleandatacsv\", type=_make_parent_dirs_and_return_path,\
+      \ required=True, default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\
+      \n_outputs = preprocess_dataset(**_parsed_args)\n"
+    args:
+    - --input-edfcsv
+    - {inputPath: input_edfcsv}
+    - --output-cleandatacsv
+    - {outputPath: output_cleandatacsv}

@@ -1,0 +1,42 @@
+name: Model predict
+metadata:
+  annotations: {author: Antoine Villatte}
+inputs:
+- {name: input_model_pickle, type: Pickle}
+- {name: input_X_predict_csv, type: CSV}
+outputs:
+- {name: output_prediction_csv, type: CSV}
+implementation:
+  container:
+    image: public.ecr.aws/f6t4n1w1/poc_kf_pipeline:latest
+    command:
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp)
+      printf "%s" "$0" > "$program_path"
+      python3 -u "$program_path" "$@"
+    - "def _make_parent_dirs_and_return_path(file_path: str):\n    import os\n   \
+      \ os.makedirs(os.path.dirname(file_path), exist_ok=True)\n    return file_path\n\
+      \ndef model_predict(input_model_pickle, \n                  input_X_predict_csv,\n\
+      \                  output_prediction_csv):\n\n    import pandas as pd\n    import\
+      \ pickle\n    import numpy as np\n\n    with open(input_model_pickle, 'rb')\
+      \ as file:\n        modfit = pickle.load(file)\n\n    X_predict = pd.read_csv(input_X_predict_csv)\n\
+      \    predictions = modfit.predict(X_predict)\n    predictions = np.exp(predictions)\
+      \ - 1\n\n    predictions_df = pd.DataFrame()\n    predictions_df[\"y_pred\"\
+      ] = predictions\n\n    predictions_df.to_csv(output_prediction_csv)\n\nimport\
+      \ argparse\n_parser = argparse.ArgumentParser(prog='Model predict', description='')\n\
+      _parser.add_argument(\"--input-model-pickle\", dest=\"input_model_pickle\",\
+      \ type=str, required=True, default=argparse.SUPPRESS)\n_parser.add_argument(\"\
+      --input-X-predict-csv\", dest=\"input_X_predict_csv\", type=str, required=True,\
+      \ default=argparse.SUPPRESS)\n_parser.add_argument(\"--output-prediction-csv\"\
+      , dest=\"output_prediction_csv\", type=_make_parent_dirs_and_return_path, required=True,\
+      \ default=argparse.SUPPRESS)\n_parsed_args = vars(_parser.parse_args())\n\n\
+      _outputs = model_predict(**_parsed_args)\n"
+    args:
+    - --input-model-pickle
+    - {inputPath: input_model_pickle}
+    - --input-X-predict-csv
+    - {inputPath: input_X_predict_csv}
+    - --output-prediction-csv
+    - {outputPath: output_prediction_csv}
