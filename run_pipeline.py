@@ -53,12 +53,22 @@ def get_cookie(text):
 URL = os.getenv('URL')
 pipeline_name = "advanced_pipeline"
 job_name = 'job' + today
-kind = "update"
 ENDPOINT = os.getenv('ENDPOINT') # Reminder : ENDPOINT is URL which ends with ...amazonaws.com/pipeline
-authservice_session = os.getenv('authservice_session')
 EMAIL = os.getenv('EMAIL')
 PASSWORD = os.getenv('PASSWORD')
 
+# Run parameters
+experiment_id = 'fe0390c9-a311-4248-89e2-72522f17c26c'
+pipeline_id = get_id(str(pipe_logs))
+version_id = '1'
+params = {'bucket' : 'src-data',
+        'data_2015' : 'temptest/2015-building-energy-benchmarking.csv',
+        'data_2016' : 'temptest/2016-building-energy-benchmarking.csv',
+        'hyperopt_iterations' : '1',
+        'subfolder' : 'temptest'}
+
+# Create run or update ?
+kind = "update"
 
 # Get cookie value
 cj = cookielib.CookieJar()
@@ -88,22 +98,10 @@ elif kind == "update":
                                    pipeline_version_name=version_name,
                                    pipeline_name = pipeline_name)
 
-# Prepare run
-experiment_id = 'fe0390c9-a311-4248-89e2-72522f17c26c'
-pipeline_id = get_id(str(pipe_logs))
-version_id = '1'
-params = {'bucket' : 'sgf-wedr-src-data',
-        'data_2015' : 'temptest/2015-building-energy-benchmarking.csv',
-        'data_2016' : 'temptest/2016-building-energy-benchmarking.csv',
-        'hyperopt_iterations' : '1',
-        'subfolder' : 'temptest'}
-
 # Run pipeline
 client.run_pipeline(experiment_id=experiment_id,
                    job_name=job_name,
                    params=params,
                    pipeline_id=pipeline_id)
 
-print("Done without error")
-# TODO:
-#client.create_recurring_run()
+
