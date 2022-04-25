@@ -1,0 +1,49 @@
+name: Create and launch pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+    
+env:
+
+  AWS_REGION: eu-west-1
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v2
+    
+    - uses: actions/checkout@v2
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v2
+      with:
+        python-version: "3.10"
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 pytest kfp mechanize beautifulsoup4 cookiejar
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        
+    - name: Get Kubectl
+      run: |
+        pip3 install kfp --upgrade
+        export PATH=$PATH:~/.local/bin
+        
+    - name: Rebuild pipeline
+      run: |
+        dsl-compile --py pipeline/pipeline.py --output pipeline/pipeline.yaml
+    
+    - name: execute py script 
+      run: |
+        python run_pipeline.py
+      env:
+        URL: ${{ secrets.KBFL_URL }}
+        ENDPOINT: ${{ secrets.KBFL_ENDPOINT }}
+        EMAIL: ${{ secrets.KBFL_LOGIN }}
+        PASSWORD: ${{ secrets.KBFL_PASSWORD }}
